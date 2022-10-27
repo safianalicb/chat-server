@@ -3,16 +3,23 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 const serverPort = ":8080"
 const delimiter byte = '\n'
 const ackMessage string = "ACK" + string(delimiter)
 const maxConnections = 5
+
+type client struct {
+	Id   int
+	conn net.Conn
+}
 
 func getListener(port string) (net.Listener, error) {
 	listener, err := net.Listen("tcp", port)
@@ -24,23 +31,21 @@ func getListener(port string) (net.Listener, error) {
 
 }
 
-func listenForMessage(conn net.Conn) {
+func listenForMessage(conn io.ReadWriter, Id int, w io.Writer) error {
 	for {
 		clientMessage, err := bufio.NewReader(conn).ReadString(delimiter)
 		if err != nil {
-			fmt.Printf("could not read message: %v\n", err)
-			return
+			return fmt.Errorf("could not read message: %v", err)
 		}
 
-		fmt.Printf("Client sent: %q\n", strings.TrimSpace(clientMessage))
+		fmt.Printf("Client %d sent: %q\n", Id, strings.TrimSpace(clientMessage))
 
 		_, err = fmt.Fprint(conn, ackMessage+string(delimiter))
 		if err != nil {
-			fmt.Printf("could not send message acknowledgement: %v\n", err)
-			return
+			return fmt.Errorf("could not send message acknowledgement: %v", err)
 		}
 
-		fmt.Println("Response sent")
+		fmt.Fprintf(w, "Response sent to client %d\n", Id)
 	}
 }
 
@@ -51,29 +56,37 @@ func terminateIfError(err error) {
 	}
 }
 
-func handleIncomingConns(listener net.Listener, connCh chan<- net.Conn, numConns *atomic.Int32) {
+func handleIncomingConns(listener net.Listener, newClientCh chan<- client, numClientsConnected *atomic.Int32) {
+	connsSoFar := 0
 	for {
-		for numConns.Load() < maxConnections {
+		for numClientsConnected.Load() < maxConnections {
 			conn, err := listener.Accept()
 			if err != nil {
 				fmt.Printf("could not create connection: %v\n", err)
+				continue
 			}
+			connsSoFar++
+			newClient := client{Id: connsSoFar, conn: conn}
 
-			connCh <- conn
-			numConns.Add(1)
-			fmt.Println("ADDED", numConns)
+			newClientCh <- newClient
+			numClientsConnected.Add(1)
+
+			fmt.Printf("Client %d added, %d clients currently connected.\n", numClientsConnected.Load(), connsSoFar)
 		}
+
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func createConnResponders(connCh <-chan net.Conn, numConns *atomic.Int32) {
-	for conn := range connCh {
-		go func(conn net.Conn) {
-			defer conn.Close()
-			listenForMessage(conn)
-			numConns.Add(-1)
-			fmt.Println("REMOVED", numConns)
-		}(conn)
+func createConnResponders(newClientCh <-chan client, numClientsConnected *atomic.Int32) {
+	for newClient := range newClientCh {
+		go func(c client) {
+			defer c.conn.Close()
+			err := listenForMessage(c.conn, c.Id, os.Stdin)
+
+			numClientsConnected.Add(-1)
+			fmt.Printf("Client %d removed due to error %q\n%d clients still connected.\n", c.Id, err, numClientsConnected.Load())
+		}(newClient)
 	}
 }
 
@@ -81,11 +94,11 @@ func main() {
 	listener, err := getListener(serverPort)
 	terminateIfError(err)
 
-	var numConns atomic.Int32
-	connCh := make(chan net.Conn)
+	var numClientsConnected atomic.Int32
+	newClientCh := make(chan client)
 
-	go createConnResponders(connCh, &numConns)
-	go handleIncomingConns(listener, connCh, &numConns)
+	go createConnResponders(newClientCh, &numClientsConnected)
+	go handleIncomingConns(listener, newClientCh, &numClientsConnected)
 
 	select {}
 
