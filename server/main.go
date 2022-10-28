@@ -16,6 +16,8 @@ const delimiter byte = '\n'
 const ackMessage string = "ACK" + string(delimiter)
 const maxConnections = 5
 
+var allClients []client
+
 type client struct {
 	id   int
 	conn net.Conn
@@ -29,6 +31,14 @@ func getListener(port string) (net.Listener, error) {
 
 	return listener, nil
 
+}
+
+func sendMessageToAllClients(userId int, message string) {
+	for _, client := range allClients {
+		if client.id != userId {
+			_, _ = fmt.Fprintf(client.conn, "Client %d: %v", userId, message)
+		}
+	}
 }
 
 // This function will listen for input to conn, and respond with an acknowldgement message.
@@ -49,6 +59,8 @@ func listenForMessage(conn io.ReadWriter, id int, w io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("could not send message acknowledgement: %v", err)
 		}
+
+		sendMessageToAllClients(id, clientMessage)
 
 		fmt.Fprintf(w, "Response sent to client %d\n", id)
 	}
@@ -76,6 +88,8 @@ func handleIncomingConns(listener net.Listener, newClientCh chan<- client, numCl
 			}
 			connsSoFar++
 			newClient := client{id: connsSoFar, conn: conn}
+
+			allClients = append(allClients, newClient)
 
 			newClientCh <- newClient
 			numClientsConnected.Add(1)
