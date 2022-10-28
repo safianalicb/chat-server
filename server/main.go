@@ -17,7 +17,7 @@ const ackMessage string = "ACK" + string(delimiter)
 const maxConnections = 5
 
 type client struct {
-	Id   int
+	id   int
 	conn net.Conn
 }
 
@@ -31,21 +31,21 @@ func getListener(port string) (net.Listener, error) {
 
 }
 
-func listenForMessage(conn io.ReadWriter, Id int, w io.Writer) error {
+func listenForMessage(conn io.ReadWriter, id int, w io.Writer) error {
 	for {
 		clientMessage, err := bufio.NewReader(conn).ReadString(delimiter)
 		if err != nil {
 			return fmt.Errorf("could not read message: %v", err)
 		}
 
-		fmt.Printf("Client %d sent: %q\n", Id, strings.TrimSpace(clientMessage))
+		fmt.Fprintf(w, "Client %d sent: %q\n", id, strings.TrimSpace(clientMessage))
 
 		_, err = fmt.Fprint(conn, ackMessage+string(delimiter))
 		if err != nil {
 			return fmt.Errorf("could not send message acknowledgement: %v", err)
 		}
 
-		fmt.Fprintf(w, "Response sent to client %d\n", Id)
+		fmt.Fprintf(w, "Response sent to client %d\n", id)
 	}
 }
 
@@ -66,7 +66,7 @@ func handleIncomingConns(listener net.Listener, newClientCh chan<- client, numCl
 				continue
 			}
 			connsSoFar++
-			newClient := client{Id: connsSoFar, conn: conn}
+			newClient := client{id: connsSoFar, conn: conn}
 
 			newClientCh <- newClient
 			numClientsConnected.Add(1)
@@ -82,10 +82,10 @@ func createConnResponders(newClientCh <-chan client, numClientsConnected *atomic
 	for newClient := range newClientCh {
 		go func(c client) {
 			defer c.conn.Close()
-			err := listenForMessage(c.conn, c.Id, os.Stdin)
+			err := listenForMessage(c.conn, c.id, os.Stdin)
 
 			numClientsConnected.Add(-1)
-			fmt.Printf("Client %d removed due to error %q\n%d clients still connected.\n", c.Id, err, numClientsConnected.Load())
+			fmt.Printf("Client %d removed due to error %q\n%d clients still connected.\n", c.id, err, numClientsConnected.Load())
 		}(newClient)
 	}
 }
