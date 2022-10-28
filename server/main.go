@@ -31,6 +31,11 @@ func getListener(port string) (net.Listener, error) {
 
 }
 
+// This function will listen for input to conn, and respond with an acknowldgement message.
+// The function will log to the writer w as it receives messages and responds to them.
+//
+// The function will run until either a read or write from conn will return an error, so the
+// function should only be run within a goroutine.
 func listenForMessage(conn io.ReadWriter, id int, w io.Writer) error {
 	for {
 		clientMessage, err := bufio.NewReader(conn).ReadString(delimiter)
@@ -56,6 +61,10 @@ func terminateIfError(err error) {
 	}
 }
 
+// This function will listen for connections on listener, and create clients and pass them into the newClientCh channel.
+// The function will update numClientsConnected as new connections come in.
+//
+// The function will run indefinitely, so it should only be run within a goroutine.
 func handleIncomingConns(listener net.Listener, newClientCh chan<- client, numClientsConnected *atomic.Int32) {
 	connsSoFar := 0
 	for {
@@ -74,10 +83,13 @@ func handleIncomingConns(listener net.Listener, newClientCh chan<- client, numCl
 			fmt.Printf("Client %d added, %d clients currently connected.\n", numClientsConnected.Load(), connsSoFar)
 		}
 
+		// This sleep is required, otherwise, when maxConnections has been reached, then the condition in the for
+		// loop will constantly be checked, which leads to excessive CPU usage.
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
+// This function listens to the channel for new clients sent to the channel, and creates seperate goroutines to handle them
 func createConnResponders(newClientCh <-chan client, numClientsConnected *atomic.Int32) {
 	for newClient := range newClientCh {
 		go func(c client) {
